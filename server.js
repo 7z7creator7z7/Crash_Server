@@ -1,104 +1,52 @@
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-const cors = require("cors");
-
+const express = require('express');
 const app = express();
-app.use(cors());
-
-const server = http.createServer(app);
-const io = new Server(server, {
+const http = require('http').createServer(app);
+const io = require('socket.io')(http, {
     cors: { origin: "*" }
 });
 
-// ================= GAME STATE =================
-let multiplier = 1.00;
-let isRunning = false;
-let crashPoint = 0;
-let interval = null;
-let bets = {}; // user bets
+let gameState = 'waiting'; 
+let history = []; 
 
-// random crash generator
-function generateCrash() {
-    const r = Math.random();
-
-    if (r < 0.45) return +(1 + Math.random() * 1.5).toFixed(2);
-    if (r < 0.80) return +(2 + Math.random() * 3).toFixed(2);
-    return +(5 + Math.random() * 20).toFixed(2);
+function generateCrashPoint() {
+    const rand = Math.random() * 100;
+    if (rand < 10) return 1.00; 
+    if (rand < 65) return parseFloat((Math.random() * 0.7 + 1.01).toFixed(2)); 
+    if (rand < 90) return parseFloat((Math.random() * 0.73 + 1.72).toFixed(2)); 
+    if (rand < 94) return parseFloat((Math.random() * 2.54 + 2.46).toFixed(2)); 
+    if (rand < 97) return parseFloat((Math.random() * 2.99 + 5.01).toFixed(2)); 
+    if (rand < 99) return parseFloat((Math.random() * 6.99 + 8.01).toFixed(2)); 
+    if (rand < 99.9) return parseFloat((Math.random() * 85 + 15).toFixed(2)); 
+    return parseFloat((Math.random() * 3099.99 + 100.01).toFixed(2)); 
 }
 
-// ================= GAME LOOP =================
-function startGame() {
-    multiplier = 1.00;
-    isRunning = true;
-    crashPoint = generateCrash();
-    bets = {};
+// O'yin sikli
+setInterval(() => {
+    if (gameState === 'waiting') {
+        gameState = 'running';
+        let target = generateCrashPoint();
+        let multiplier = 1.00;
 
-    io.emit("game:start");
+        let interval = setInterval(() => {
+            multiplier += 0.05; // O'sish tezligi
+            io.emit('multiplier', multiplier.toFixed(2));
 
-    interval = setInterval(() => {
-        multiplier += 0.01;
+            if (multiplier >= target) {
+                clearInterval(interval);
+                gameState = 'waiting';
+                io.emit('crash', target.toFixed(2));
+                
+                // Historyga qo'shish
+                history.unshift(target.toFixed(2));
+                if(history.length > 5) history.pop();
+                io.emit('history', history);
+                
+                // 15 soniya kutiladi
+                setTimeout(() => { gameState = 'waiting'; }, 15000);
+            }
+        }, 200); 
+    }
+}, 16000);
 
-        io.emit("multiplier:update", {
-            multiplier: multiplier.toFixed(2)
-        });
-
-        // crash
-        if (multiplier >= crashPoint) {
-            clearInterval(interval);
-            isRunning = false;
-
-            io.emit("game:crash", {
-                crashPoint: crashPoint.toFixed(2)
-            });
-
-            setTimeout(startGame, 4000);
-        }
-
-    }, 100);
-}
-
-// ================= SOCKET =================
-io.on("connection", (socket) => {
-
-    console.log("User connected:", socket.id);
-
-    socket.emit("game:state", {
-        multiplier,
-        isRunning
-    });
-
-    // BET PLACE
-    socket.on("bet:place", (data) => {
-        if (isRunning === false) return;
-
-        bets[socket.id] = {
-            amount: data.amount,
-            cashedOut: false
-        };
-    });
-
-    // CASHOUT
-    socket.on("bet:cashout", () => {
-        const bet = bets[socket.id];
-        if (!bet || bet.cashedOut) return;
-
-        bet.cashedOut = true;
-
-        const win = bet.amount * multiplier;
-
-        socket.emit("bet:result", {
-            win: win.toFixed(2)
-        });
-    });
-
-    socket.on("disconnect", () => {
-        delete bets[socket.id];
-    });
-});
-
-// ================= START SERVER =================
-server.listen(3000, () => {
-    console.log("Crash server running on port 3000");
-    startGame();
-});
+const PORT = process.env.PORT || 3000;
+http.listen(PORT, () => console.log(`Server ${PORT}-portda ishlamoqda`));
